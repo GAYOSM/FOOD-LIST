@@ -12,7 +12,7 @@ DB_NAME = "restaurant.db"
 MENU_ITEMS = [
     "Porotta", "Dosa", "Idiyappam", "Chappathi",
     "Chicken Fry half", "Chicken Fry half", "Chicken Curry half", "Chicken Curry Full", "Beef Fry", "Beef Curry",
-    "Kanthari Piece", "Kurumma",
+    "Kanthari Piece", "Chikken Chilli", "Kurumma",
     "Set Bulsey", "Single Omblet", "Double Omblet",
     "Kanthari Combo", "49/- Combo", "Chicken fry Combo", "Beef Chapse Combo", "Pazhampori Combo",
     "Drink (20)", "Drink (40)", "Lime", 
