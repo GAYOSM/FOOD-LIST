@@ -16,7 +16,7 @@ MENU_ITEMS = [
     "Set Bulsey", "Single Omblet", "Double Omblet",
     "Kanthari Combo", "49/- Combo", "Chicken fry Combo",
     "Beef Chapse Combo", "Pazhampori Combo",
-    "Drink (20)", "Drink (40)"
+    "Drink (20)", "Drink (40)", "Lime"
 ]
 
 # ================== PAGE ==================
