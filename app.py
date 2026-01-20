@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from datetime import datetime
-from streamlit_autorefresh import st_autorefresh
 
 # ================== CONFIG ==================
 NUM_TABLES = 7
@@ -11,19 +10,18 @@ DB_NAME = "restaurant.db"
 
 MENU_ITEMS = [
     "Porotta", "Dosa", "Idiyappam", "Chappathi",
-    "Chicken Fry half", "Chicken Fry half", "Chicken Curry half", "Chicken Curry Full", "Beef Fry", "Beef Curry",
-    "Kanthari Piece", "Chikken Chilli", "Kurumma",
-    "Set Bulsey", "Single Omblet", "Double Omblet",
-    "Kanthari Combo", "49/- Combo", "Chicken fry Combo", "Beef Chapse Combo", "Pazhampori Combo",
-    "Drink (20)", "Drink (40)", "Lime", 
+    "Chicken Fry half", "Chicken Curry half", "Chicken Curry Full",
+    "Beef Fry", "Beef Curry",
+    "Kanthari Piece", "Chicken Chilli", "Kurumma",
+    "Set Bulsey", "Single Omelet", "Double Omelet",
+    "Kanthari Combo", "49/- Combo", "Chicken Fry Combo",
+    "Beef Chapse Combo", "Pazhampori Combo",
+    "Drink (20)", "Drink (40)", "Lime",
     "Chaya", "Vada"
 ]
 
 # ================== PAGE ==================
 st.set_page_config(page_title="Restaurant Order Manager", layout="wide")
-
-# ================== AUTO REFRESH ==================
-st_autorefresh(interval=2000)
 
 # ================== DATABASE ==================
 conn = sqlite3.connect(DB_NAME, check_same_thread=False)
@@ -54,7 +52,7 @@ conn.commit()
 def add_item(table_id, chair_id, item, qty):
     cur.execute(
         "INSERT INTO orders VALUES (?, ?, ?, ?, ?)",
-        (table_id, chair_id, item, qty, datetime.now())
+        (table_id, chair_id, item, qty, datetime.now().isoformat())
     )
     conn.commit()
 
@@ -113,6 +111,7 @@ with c4:
     if st.button("Add", type="primary"):
         add_item(selected_table, chair, food, qty)
         st.success("Order Added")
+        st.rerun()
 
 st.divider()
 
@@ -194,4 +193,3 @@ SELECT COUNT(*) FROM (
 
 active = cur.fetchone()[0] or 0
 st.sidebar.write(f"Active Chairs: {active}/{NUM_TABLES * CHAIRS_PER_TABLE}")
-
