@@ -1,195 +1,211 @@
 import streamlit as st
-import pandas as pd
 import sqlite3
 from datetime import datetime
+from streamlit_autorefresh import st_autorefresh
+import pandas as pd
+from collections import defaultdict
 
-# ================== CONFIG ==================
+# ================= CONFIG =================
 NUM_TABLES = 7
-CHAIRS_PER_TABLE = 4
 DB_NAME = "restaurant.db"
-
-MENU_ITEMS = [
-    "Porotta", "Dosa", "Idiyappam", "Chappathi",
-    "Chicken Fry half", "Chicken Curry half", "Chicken Curry Full",
-    "Beef Fry", "Beef Curry",
-    "Kanthari Piece", "Chicken Chilli", "Kurumma",
-    "Set Bulsey", "Single Omelet", "Double Omelet",
-    "Kanthari Combo", "49/- Combo", "Chicken Fry Combo",
-    "Beef Chapse Combo", "Pazhampori Combo",
-    "Drink (20)", "Drink (40)", "Lime",
-    "Chaya", "Vada"
+MENU_ITEMS = ["",
+    "Porotta", "Dosa", "Idly", "Chaya", "Lime",
+    "Chicken Curry", "Beef Fry", "Vada", "Chappathi"
 ]
 
-# ================== PAGE ==================
-st.set_page_config(page_title="Restaurant Order Manager", layout="wide")
-
-# ================== DATABASE ==================
+# ================= DB SETUP =================
 conn = sqlite3.connect(DB_NAME, check_same_thread=False)
 cur = conn.cursor()
 
 cur.execute("""
 CREATE TABLE IF NOT EXISTS orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     table_id INTEGER,
-    chair_id INTEGER,
+    section_id INTEGER,
     item TEXT,
     qty INTEGER,
+    status TEXT,
     created_at TEXT
 )
 """)
-
-cur.execute("""
-CREATE TABLE IF NOT EXISTS chair_groups (
-    table_id INTEGER,
-    chair_id INTEGER,
-    group_id INTEGER,
-    PRIMARY KEY (table_id, chair_id)
-)
-""")
-
 conn.commit()
 
-# ================== FUNCTIONS ==================
-def add_item(table_id, chair_id, item, qty):
+# ================= FUNCTIONS =================
+def add_order(table_id, section_id, item, qty=1):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     cur.execute(
-        "INSERT INTO orders VALUES (?, ?, ?, ?, ?)",
-        (table_id, chair_id, item, qty, datetime.now().isoformat())
+        "INSERT INTO orders (table_id, section_id, item, qty, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (table_id, section_id, item, qty, "Preparing", timestamp)
     )
     conn.commit()
 
-def clear_table(table_id):
-    cur.execute("DELETE FROM orders WHERE table_id=?", (table_id,))
-    conn.commit()
+def get_orders(table_id=None, section_id=None, status=None):
+    query = "SELECT * FROM orders WHERE 1=1"
+    params = []
+    if table_id:
+        query += " AND table_id=?"
+        params.append(table_id)
+    if section_id:
+        query += " AND section_id=?"
+        params.append(section_id)
+    if status:
+        if isinstance(status, list):
+            if status:
+                placeholders = ",".join("?" for _ in status)
+                query += f" AND status IN ({placeholders})"
+                params.extend(status)
+            else:
+                # if list is empty, return no results
+                query += " AND 1=0"
+        else:
+            query += " AND status=?"
+            params.append(status)
+    query += " ORDER BY created_at DESC"
+    cur.execute(query, tuple(params))
+    return cur.fetchall()
 
-def get_orders(table_id, chair_id):
-    cur.execute("""
-        SELECT item, SUM(qty)
-        FROM orders
-        WHERE table_id=? AND chair_id=?
-        GROUP BY item
-    """, (table_id, chair_id))
-    return dict(cur.fetchall())
+def get_new_section_id(table_id):
+    cur.execute("SELECT MAX(section_id) FROM orders WHERE table_id=?", (table_id,))
+    max_id = cur.fetchone()[0]
+    return (max_id or 0) + 1
 
-def set_group(table_id, chair_id, group_id):
-    cur.execute("""
-        INSERT OR REPLACE INTO chair_groups VALUES (?, ?, ?)
-    """, (table_id, chair_id, group_id))
-    conn.commit()
-
-def get_group(table_id, chair_id):
-    cur.execute("""
-        SELECT group_id FROM chair_groups
-        WHERE table_id=? AND chair_id=?
-    """, (table_id, chair_id))
+def update_qty(order_id, change):
+    cur.execute("SELECT qty FROM orders WHERE id=?", (order_id,))
     row = cur.fetchone()
-    return row[0] if row else 1
-
-# ================== SIDEBAR ==================
-st.sidebar.title("🍽️ Table Selector")
-selected_table = st.sidebar.radio(
-    "Select Table",
-    range(1, NUM_TABLES + 1),
-    format_func=lambda x: f"Table {x}"
-)
-
-# ================== MAIN ==================
-st.title(f"Table {selected_table}")
-st.caption(f"Capacity: {CHAIRS_PER_TABLE} Chairs")
-
-# ================== ADD ORDER ==================
-st.subheader("📝 Add Order")
-c1, c2, c3, c4 = st.columns([3, 1, 1, 1])
-
-with c1:
-    food = st.selectbox("Food Item", MENU_ITEMS)
-with c2:
-    qty = st.number_input("Qty", 1, 20, 1)
-with c3:
-    chair = st.selectbox("Chair", range(1, CHAIRS_PER_TABLE + 1))
-with c4:
-    st.write("")
-    st.write("")
-    if st.button("Add", type="primary"):
-        add_item(selected_table, chair, food, qty)
-        st.success("Order Added")
+    if row:
+        qty = row[0] + change
+        if qty <= 0:
+            cur.execute("DELETE FROM orders WHERE id=?", (order_id,))
+        else:
+            cur.execute("UPDATE orders SET qty=? WHERE id=?", (qty, order_id))
+        conn.commit()
         st.rerun()
 
-st.divider()
-
-# ================== GROUPING ==================
-with st.expander("🔗 Link Chairs / Split Bill"):
-    cols = st.columns(CHAIRS_PER_TABLE)
-    for i, col in enumerate(cols):
-        chair_no = i + 1
-        current_grp = get_group(selected_table, chair_no)
-        with col:
-            grp = st.selectbox(
-                f"Chair {chair_no}",
-                [1, 2, 3, 4],
-                index=current_grp - 1,
-                key=f"grp_{selected_table}_{chair_no}"
-            )
-            set_group(selected_table, chair_no, grp)
-
-# ================== DISPLAY CHAIRS ==================
-st.subheader("🪑 Current Orders")
-chair_cols = st.columns(CHAIRS_PER_TABLE)
-
-for i, col in enumerate(chair_cols):
-    chair_no = i + 1
-    orders = get_orders(selected_table, chair_no)
-    grp_id = get_group(selected_table, chair_no)
-
-    with col:
-        st.info(f"Chair {chair_no} | Group {grp_id}")
-        if orders:
-            df = pd.DataFrame(orders.items(), columns=["Item", "Qty"])
-            st.dataframe(df, hide_index=True, use_container_width=True)
-            st.markdown(f"**Items:** {sum(orders.values())}")
-        else:
-            st.caption("No orders")
-
-# ================== BILL SUMMARY ==================
-st.divider()
-st.subheader("📊 Bill Summary")
-
-groups = {}
-for c in range(1, CHAIRS_PER_TABLE + 1):
-    grp = get_group(selected_table, c)
-    groups.setdefault(grp, []).append(c)
-
-for grp_id, chairs in groups.items():
-    summary = {}
-    total = 0
-    for c in chairs:
-        orders = get_orders(selected_table, c)
-        for item, qty in orders.items():
-            summary[item] = summary.get(item, 0) + qty
-            total += qty
-
-    st.markdown(f"### 🧾 Group {grp_id} (Chairs {chairs})")
-    if summary:
-        df = pd.DataFrame(summary.items(), columns=["Item", "Qty"])
-        st.dataframe(df, hide_index=True, use_container_width=True)
-        st.markdown(f"**Total Items:** {total}")
-    else:
-        st.caption("No orders")
-    st.divider()
-
-# ================== CLEAR ==================
-if st.button("❌ Clear Table", type="secondary"):
-    clear_table(selected_table)
-    st.warning("Table cleared")
+def update_status(order_id, status):
+    cur.execute("UPDATE orders SET status=? WHERE id=?", (status, order_id))
+    conn.commit()
     st.rerun()
 
-# ================== SIDEBAR STATUS ==================
-st.sidebar.divider()
-st.sidebar.markdown("### 📍 Restaurant Status")
+def delete_order(order_id):
+    cur.execute("DELETE FROM orders WHERE id=?", (order_id,))
+    conn.commit()
+    st.rerun()
 
-cur.execute("""
-SELECT COUNT(*) FROM (
-    SELECT DISTINCT table_id, chair_id FROM orders
-)
-""")
 
-active = cur.fetchone()[0] or 0
-st.sidebar.write(f"Active Chairs: {active}/{NUM_TABLES * CHAIRS_PER_TABLE}")
+# ================= SESSION STATE =================
+if "selected_table" not in st.session_state:
+    st.session_state.selected_table = 1
+
+# ================= UI =================
+st.set_page_config(page_title="Restaurant Order Manager", layout="wide", initial_sidebar_state="collapsed")
+st.title("🍽️ Restaurant Order Manager")
+
+# View switcher
+view = st.sidebar.radio("Switch View", ["Waiter", "Kitchen"], 0)
+
+# ================= WAITER VIEW =================
+if view == "Waiter":
+    st.sidebar.header("Waiter Controls")
+    
+    # --- Table Selection in Sidebar ---
+    st.sidebar.subheader("Select Table")
+    st.session_state.selected_table = st.sidebar.number_input("Table", min_value=1, max_value=NUM_TABLES, value=st.session_state.selected_table)
+
+    st.header(f"Table {st.session_state.selected_table}")
+
+    # --- Get all orders for the table and group by section ---
+    table_orders = get_orders(table_id=st.session_state.selected_table)
+    sections = defaultdict(list)
+    for order in table_orders:
+        sections[order[2]].append(order) # order[2] is section_id
+
+    # --- Menu and Ordering ---
+    with st.expander("Add New Item", expanded=True):
+        col1, col2, col3, col4 = st.columns([2, 1, 2, 2])
+        with col1:
+            selected_item = st.selectbox("Select an item", MENU_ITEMS)
+        with col2:
+            quantity = st.number_input("Quantity", min_value=1, value=1)
+        with col3:
+            existing_sections = sorted(sections.keys())
+            section_options = [f"Section {s}" for s in existing_sections] + ["Create New Section"]
+            selected_section_str = st.selectbox("Choose Section", options=section_options)
+        
+        with col4:
+            st.write("") # align button
+            st.write("") # align button
+            if st.button("Add to Order", use_container_width=True, type="primary"):
+                if selected_section_str == "Create New Section":
+                    target_section = get_new_section_id(st.session_state.selected_table)
+                else:
+                    target_section = int(selected_section_str.split(" ")[1])
+                
+                add_order(st.session_state.selected_table, target_section, selected_item, quantity)
+                st.success(f"Added {quantity} x {selected_item} to Table {st.session_state.selected_table}, {selected_section_str}")
+                st.rerun()
+
+    st.subheader("Current Orders")
+    if not sections:
+        st.info("No orders for this table yet.")
+    else:
+        for section_id, orders in sorted(sections.items()):
+            with st.container(border=True):
+                st.markdown(f"**Section {section_id}**")
+                for o in orders:
+                    order_id, _, _, item, qty, status, _ = o
+                    
+                    c1, c2, c3, c4, c5 = st.columns([3, 1, 2, 2, 1])
+                    c1.markdown(f"**{item}**")
+                    c2.markdown(f"`{qty}`")
+
+                    with c3:
+                        cc1, cc2 = st.columns(2)
+                        if cc1.button("➖", key=f"dec_{order_id}", use_container_width=True):
+                            update_qty(order_id, -1)
+                        if cc2.button("➕", key=f"inc_{order_id}", use_container_width=True):
+                            update_qty(order_id, 1)
+
+                    if status == "Preparing":
+                        c4.info("Preparing")
+                    elif status == "Ready":
+                        c4.button("Mark as Served", key=f"serve_{order_id}", on_click=update_status, args=(order_id, "Served"), use_container_width=True, type="primary")
+                    else: # Served
+                        c4.success("Served")
+                    
+                    c5.button("🗑️", key=f"del_{order_id}", on_click=delete_order, args=(order_id,), use_container_width=True)
+
+
+# ================= KITCHEN VIEW =================
+elif view == "Kitchen":
+    st.header("🍳 Kitchen View")
+    
+    # --- Auto-refresh control ---
+    if st.sidebar.checkbox("Auto-refresh", value=True):
+        st_autorefresh(interval=5000, key="kitchen_refresh")
+
+    # --- Order Filtering ---
+    st.sidebar.header("Kitchen Filters")
+    filter_status = st.sidebar.multiselect("Filter by Status", ["Preparing", "Ready", "Served"], default=["Preparing", "Ready"])
+    
+    # --- Display Orders in Columns ---
+    all_orders = get_orders(status=filter_status)
+    if not all_orders:
+        st.warning("No orders with selected filters.")
+    else:
+        num_columns = 3
+        cols = st.columns(num_columns)
+        for i, o in enumerate(all_orders):
+            order_id, table_id, section_id, item, qty, status, created_at = o
+            with cols[i % num_columns].container(border=True):
+                st.markdown(f"**Table {table_id} | Section {section_id}**")
+                st.markdown(f"### {qty} x {item}")
+                st.caption(f"Ordered at: {created_at}")
+                
+                if status == "Preparing":
+                    st.info("Status: Preparing...")
+                    if st.button("Mark as Ready", key=f"kitchen_ready_{order_id}", use_container_width=True, type="primary"):
+                        update_status(order_id, "Ready")
+                elif status == "Ready":
+                    st.warning("Status: Ready")
+                else: # Served
+                    st.success("Status: Served")
