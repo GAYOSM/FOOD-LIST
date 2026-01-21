@@ -417,23 +417,28 @@ elif view == "Configuration":
     if not menu_items:
         st.info("No items in the menu. Add one above.")
     else:
-        for item_id, name, price in menu_items:
-            with st.container(border=True):
-                c1, c2 = st.columns([1,1])
-                with c1:
-                    st.markdown(f"#### {name}")
-                    st.markdown(f"**Price:** ₹{price:.2f}")
+        num_columns = 2 # Match Kitchen view responsiveness
+        cols = st.columns(num_columns)
+        for i, (item_id, name, price) in enumerate(menu_items):
+            with cols[i % num_columns].container(border=True):
+                st.markdown(f"#### {name}")
+                st.markdown(f"**Price:** ₹{price:.2f}")
                 
-                with c2:
-                    if st.button("Delete Item", key=f"del_{item_id}", use_container_width=True):
+                # Action buttons
+                col_del, col_edit_exp = st.columns([1,1])
+                with col_del:
+                    if st.button("Delete Item", key=f"cfg_del_{item_id}", use_container_width=True): # Changed key to avoid conflicts
                         delete_menu_item(item_id)
                         st.rerun()
                 
-                with st.expander("Edit Item"):
-                    with st.form(f"edit_{item_id}"):
-                        new_name = st.text_input("Item Name", value=name)
-                        new_price = st.number_input("Price", value=price, min_value=0.0, format="%.2f")
-                        if st.form_submit_button("Save Changes", type="primary", use_container_width=True):
-                            update_menu_item(item_id, new_name, new_price)
-                            st.rerun()
+                with col_edit_exp:
+                    # The Edit Expander will be placed here
+                    with st.expander("Edit Item"):
+                        with st.form(f"cfg_edit_form_{item_id}", clear_on_submit=False): # Changed key
+                            edited_name = st.text_input("Item Name", value=name, key=f"cfg_edit_name_{item_id}")
+                            edited_price = st.number_input("Price", value=price, min_value=0.0, format="%.2f", key=f"cfg_edit_price_{item_id}")
+                            if st.form_submit_button("Save Changes", type="primary", use_container_width=True):
+                                if update_menu_item(item_id, edited_name, edited_price):
+                                    st.success(f"Updated '{edited_name}'.")
+                                    st.rerun()
     
