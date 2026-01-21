@@ -1,7 +1,14 @@
 import streamlit as st
 import sqlite3
 from datetime import datetime
-from streamlit_autorefresh import st_autorefresh
+try:
+    from streamlit_autorefresh import st_autorefresh
+except ImportError:
+    # Define a dummy function if the module is not found
+    def st_autorefresh(*args, **kwargs):
+        st.warning("`streamlit_autorefresh` not found. Auto-refresh will be disabled. Please install it with `pip install streamlit-autorefresh` if you need this feature.")
+        pass # Do nothing
+
 import pandas as pd
 from collections import defaultdict
 
@@ -177,8 +184,7 @@ def delete_menu_item(item_id):
     cur.execute("DELETE FROM menu WHERE id=?", (item_id,))
     conn.commit()
 
-def set_table(table_number):
-    st.session_state.selected_table = table_number
+
 
 
 
@@ -196,25 +202,24 @@ view = st.sidebar.radio("Switch View", ["Waiter", "Kitchen", "Configuration"], 0
 # ================= WAITER VIEW =================
 if view == "Waiter":
     st.sidebar.header("Waiter Controls")
+    if st.sidebar.checkbox("Auto-refresh", value=True):
+        st_autorefresh(interval=5000, key="waiter_refresh")
 
     # --- Table Selection ---
     st.subheader("Select a Table")
-    cols = st.columns(NUM_TABLES)
-    for i in range(NUM_TABLES):
-        table_num = i + 1
-        with cols[i]:
-            is_selected = (st.session_state.selected_table == table_num)
-            st.button(
-                f"Table {table_num}",
-                key=f"table_{table_num}",
-                on_click=set_table,
-                args=(table_num,),
-                type="primary" if is_selected else "secondary",
-                use_container_width=True
-            )
+    table_options = [str(i) for i in range(1, NUM_TABLES + 1)] # Changed to string for st.radio labels
     
-    st.markdown("---")
-    st.header(f"Table {st.session_state.selected_table}")
+    # Use st.radio for responsive table selection
+    selected_table_str = st.radio(
+        "Choose Table", 
+        table_options, 
+        index=st.session_state.selected_table - 1, 
+        horizontal=True,
+        key="table_selector" # Added a key for st.radio
+    )
+    st.session_state.selected_table = int(selected_table_str) # Convert back to int
+    st.divider() # Add a divider for visual separation
+    st.subheader("Current Orders")
 
 
     # --- Get all orders for the table and group by section ---
@@ -227,22 +232,22 @@ if view == "Waiter":
     menu_prices_dict = {name: price for _, name, price in get_menu_items()}
 
     # --- Menu and Ordering ---
-    with st.expander("Add New Item", expanded=True):
+    with st.expander("Add New Item", expanded=False):
         col1, col2, col3, col4 = st.columns([2, 1, 2, 2])
         with col1:
             menu_item_names = [""] + sorted(list(menu_prices_dict.keys()))
             selected_item = st.selectbox("Select an item", menu_item_names)
         with col2:
             quantity = st.number_input("Quantity", min_value=1, value=1)
-            is_parcel_add = st.checkbox("Parcel", key="add_parcel")
+            is_parcel_add = st.checkbox("🛍️", key="add_parcel")
         with col3:
             existing_sections = sorted(sections.keys())
             section_options = [f"Section {s}" for s in existing_sections] + ["Create New Section"]
             selected_section_str = st.selectbox("Choose Section", options=section_options)
 
         with col4:
-            st.write("") # align button
-            st.write("") # align button
+            st.write("")
+            st.write("")
             if st.button("Add to Order", use_container_width=True, type="primary"):
                 if selected_item == "":
                     st.warning("Please select an item.")
@@ -262,17 +267,6 @@ if view == "Waiter":
     else:
         grand_total = 0
         
-        # Header
-        c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([3, 1, 1, 1, 1, 2, 2, 1])
-        c1.markdown("**Item**")
-        c2.markdown("**Qty**")
-        c3.markdown("**Price**")
-        c4.markdown("**Total**")
-        c5.markdown(" ") # Parcel
-        c6.markdown("") # For buttons
-        c7.markdown("") # For status
-        c8.markdown("") # For delete
-
         for section_id, orders in sorted(sections.items()):
             with st.container(border=True):
                 c1, c2 = st.columns([0.85, 0.15])
@@ -290,48 +284,55 @@ if view == "Waiter":
                 section_total = 0
 
                 for o in orders:
-                    # id, table_id, section_id, item, qty, status, created_at, price, is_parcel
                     order_id, _, _, item, qty, status, _, price, is_parcel = o
                     if price is None:
-                        price = menu_prices_dict.get(item, 0) # Assign price if missing
+                        price = menu_prices_dict.get(item, 0)
                     total_price = qty * price
                     section_total += total_price
 
-                    c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([3, 1, 1, 1, 1, 2, 2, 1])
-                    c1.markdown(f"**{item}** {'🛍️' if is_parcel else ''}")
-                    c2.markdown(f"`{qty}`")
-                    c3.markdown(f"₹{price:.2f}")
-                    c4.markdown(f"**₹{total_price:.2f}**")
+                    with st.container(border=False):
+                        c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
+                        with c1:
+                            st.markdown(f"<p style='font-size:18px;'><b>{item}</b> {'🛍️' if is_parcel else ''}</p>", unsafe_allow_html=True)
+                            st.markdown(f"<p style='font-size:12px; color:grey;'>Price: ₹{price:.2f} | Total: ₹{total_price:.2f}</p>", unsafe_allow_html=True)
+                        
+                        with c2:
+                            disable_qty_buttons = (status == "Served")
+                            # Use columns directly within c2 for better stacking on mobile
+                            qty_col1, qty_col2, qty_col3 = st.columns([1, 2, 1]) 
+                            with qty_col1:
+                                if st.button("➖", key=f"dec_{order_id}", use_container_width=True, disabled=disable_qty_buttons):
+                                    if not disable_qty_buttons:
+                                        update_qty(order_id, -1)
+                            with qty_col2:
+                                st.markdown(f"<div style='text-align: center; padding-top: 0px; font-size:18px;'><b>`{qty}`</b></div>", unsafe_allow_html=True)
+                            with qty_col3:
+                                if st.button("➕", key=f"inc_{order_id}", use_container_width=True, disabled=disable_qty_buttons):
+                                    if not disable_qty_buttons:
+                                        update_qty(order_id, 1)
 
-                    with c5:
-                        disable_parcel_toggle = (status == "Served")
-                        if st.button("🛍️", key=f"parcel_{order_id}", help="Toggle Parcel Status", disabled=disable_parcel_toggle):
-                            if not disable_parcel_toggle:
-                                toggle_parcel_status(order_id)
-                    
-                    with c6:
-                        cc1, cc2 = st.columns(2)
-                        disable_qty_buttons = (status == "Served")
-                        if cc1.button("➖", key=f"dec_{order_id}", use_container_width=True, disabled=disable_qty_buttons):
-                            if not disable_qty_buttons:
-                                update_qty(order_id, -1)
-                        if cc2.button("➕", key=f"inc_{order_id}", use_container_width=True, disabled=disable_qty_buttons):
-                            if not disable_qty_buttons:
-                                update_qty(order_id, 1)
+                        with c3:
+                            if status == "Preparing":
+                                st.markdown("<p style='color:orange; font-size:18px;'><b>Preparing</b></p>", unsafe_allow_html=True)
+                            elif status == "Ready":
+                                st.button("Mark as Served", key=f"serve_{order_id}", on_click=update_status, args=(order_id, "Served"), use_container_width=True, type="primary")
+                            else:
+                                st.markdown("<p style='color:lightgreen; font-size:18px;'><b>Served</b></p>", unsafe_allow_html=True)
+                        
+                        with c4:
+                            if status != "Served":
+                                disable_buttons = (status == "Served")
+                                col_parcel, col_delete = st.columns(2) # Create two columns for the buttons
+                                with col_parcel:
+                                    if st.button("🛍️", key=f"parcel_{order_id}", help="Toggle Parcel Status", disabled=disable_buttons, use_container_width=True):
+                                        if not disable_buttons:
+                                            toggle_parcel_status(order_id)
+                                with col_delete:
+                                    if st.button("🗑️", key=f"del_{order_id}", use_container_width=True, help="Delete this item"):
+                                        delete_order(order_id)
+                    st.divider()
 
-                    if status == "Preparing":
-                        c7.info("Preparing")
-                    elif status == "Ready":
-                        c7.button("Mark as Served", key=f"serve_{order_id}", on_click=update_status, args=(order_id, "Served"), use_container_width=True, type="primary")
-                    else: # Served
-                        c7.success("Served")
 
-                    if status != "Served":
-                        c8.button("🗑️", key=f"del_{order_id}", on_click=delete_order, args=(order_id,), use_container_width=True)
-                    else:
-                        c8.write("")
-
-                st.markdown("---")
                 st.markdown(f"<h5 style='text-align: right;'>Section Total: ₹{section_total:.2f}</h5>", unsafe_allow_html=True)
                 grand_total += section_total
 
@@ -364,7 +365,7 @@ elif view == "Kitchen":
     if not all_orders:
         st.warning("No orders with selected filters.")
     else:
-        num_columns = 3
+        num_columns = 2 # Changed for better mobile responsiveness
         cols = st.columns(num_columns)
         for i, o in enumerate(all_orders):
             order_id, table_id, section_id, item, qty, status, created_at, _, is_parcel = o
@@ -375,17 +376,17 @@ elif view == "Kitchen":
                     st.markdown("### 🛍️ PARCEL")
 
                 st.markdown(f"**Table {table_id} | Section {section_id} {emoji}**")
-                st.markdown(f"### {qty} x {item}")
+                st.markdown(f"### **{qty} x {item}**")
                 st.caption(f"Ordered at: {created_at}")
                 
                 if status == "Preparing":
-                    st.info("Status: Preparing...")
+                    st.markdown("<p style='color:orange; font-size:18px;'><b>Status: Preparing...</b></p>", unsafe_allow_html=True)
                     if st.button("Mark as Ready", key=f"kitchen_ready_{order_id}", use_container_width=True, type="primary"):
                         update_status(order_id, "Ready")
                 elif status == "Ready":
-                    st.warning("Status: Ready")
-                else: # Served
-                    st.success("Status: Served")
+                    st.markdown("<p style='color:yellow; font-size:18px;'><b>Status: ✅Ready</b></p>", unsafe_allow_html=True)
+                else: 
+                    st.markdown("<p style='color:lightgreen; font-size:18px;'><b>Status: Served</b></p>", unsafe_allow_html=True)
 
 # ================= CONFIGURATION VIEW =================
 elif view == "Configuration":
