@@ -265,77 +265,81 @@ if view == "Waiter":
     if not sections:
         st.info("No orders for this table yet.")
     else:
+        # Calculate grand total for all sections first
         grand_total = 0
-        
         for section_id, orders in sorted(sections.items()):
-            with st.container(border=True):
-                c1, c2 = st.columns([0.85, 0.15])
-                with c1:
-                    st.markdown(f"**Section {section_id}**")
-                with c2:
-                    st.button(
-                        "❌", 
-                        key=f"del_sec_{section_id}", 
-                        on_click=delete_section, 
-                        args=(st.session_state.selected_table, section_id),
-                        help="Delete this entire section"
-                    )
+            section_total_sum = sum(order[7] * order[4] for order in orders if order[7] is not None)
+            grand_total += section_total_sum
+        
+        # Iterate through sections and display each as an expander
+        for section_id, orders in sorted(sections.items()):
+            with st.expander(f"**Section {section_id}**"):
+                with st.container(border=True): # Use container for consistent styling
+                    c1, c2 = st.columns([0.85, 0.15])
+                    with c1:
+                        st.markdown(f"**Section {section_id}**")
+                    with c2:
+                        st.button(
+                            "❌", 
+                            key=f"del_sec_{section_id}", 
+                            on_click=delete_section, 
+                            args=(st.session_state.selected_table, section_id),
+                            help="Delete this entire section"
+                        )
 
-                section_total = 0
+                    section_total_display = 0 
+                    for o in orders: # Use 'orders' directly for the current section
+                        order_id, _, _, item, qty, status, _, price, is_parcel = o
+                        if price is None:
+                            price = menu_prices_dict.get(item, 0)
+                        total_price = qty * price
+                        section_total_display += total_price
 
-                for o in orders:
-                    order_id, _, _, item, qty, status, _, price, is_parcel = o
-                    if price is None:
-                        price = menu_prices_dict.get(item, 0)
-                    total_price = qty * price
-                    section_total += total_price
+                        with st.container(border=False):
+                            c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
+                            with c1:
+                                st.markdown(f"<p style='font-size:18px;'><b>{item}</b> {'🛍️' if is_parcel else ''}</p>", unsafe_allow_html=True)
+                                st.markdown(f"<p style='font-size:12px; color:grey;'>Price: ₹{price:.2f} | Total: ₹{total_price:.2f}</p>", unsafe_allow_html=True)
+                            
+                            with c2:
+                                disable_qty_buttons = (status == "Served")
+                                # Use columns directly within c2 for better stacking on mobile
+                                qty_col1, qty_col2, qty_col3 = st.columns([1, 2, 1]) 
+                                with qty_col1:
+                                    if st.button("➖", key=f"dec_{order_id}", use_container_width=True, disabled=disable_qty_buttons):
+                                        if not disable_qty_buttons:
+                                            update_qty(order_id, -1)
+                                with qty_col2:
+                                    st.markdown(f"<div style='text-align: center; padding-top: 0px; font-size:18px;'><b>`{qty}`</b></div>", unsafe_allow_html=True)
+                                with qty_col3:
+                                    if st.button("➕", key=f"inc_{order_id}", use_container_width=True, disabled=disable_qty_buttons):
+                                        if not disable_qty_buttons:
+                                            update_qty(order_id, 1)
 
-                    with st.container(border=False):
-                        c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
-                        with c1:
-                            st.markdown(f"<p style='font-size:18px;'><b>{item}</b> {'🛍️' if is_parcel else ''}</p>", unsafe_allow_html=True)
-                            st.markdown(f"<p style='font-size:12px; color:grey;'>Price: ₹{price:.2f} | Total: ₹{total_price:.2f}</p>", unsafe_allow_html=True)
-                        
-                        with c2:
-                            disable_qty_buttons = (status == "Served")
-                            # Use columns directly within c2 for better stacking on mobile
-                            qty_col1, qty_col2, qty_col3 = st.columns([1, 2, 1]) 
-                            with qty_col1:
-                                if st.button("➖", key=f"dec_{order_id}", use_container_width=True, disabled=disable_qty_buttons):
-                                    if not disable_qty_buttons:
-                                        update_qty(order_id, -1)
-                            with qty_col2:
-                                st.markdown(f"<div style='text-align: center; padding-top: 0px; font-size:18px;'><b>`{qty}`</b></div>", unsafe_allow_html=True)
-                            with qty_col3:
-                                if st.button("➕", key=f"inc_{order_id}", use_container_width=True, disabled=disable_qty_buttons):
-                                    if not disable_qty_buttons:
-                                        update_qty(order_id, 1)
-
-                        with c3:
-                            if status == "Preparing":
-                                st.markdown("<p style='color:orange; font-size:18px;'><b>Preparing</b></p>", unsafe_allow_html=True)
-                            elif status == "Ready":
-                                st.button("Mark as Served", key=f"serve_{order_id}", on_click=update_status, args=(order_id, "Served"), use_container_width=True, type="primary")
-                            else:
-                                st.markdown("<p style='color:lightgreen; font-size:18px;'><b>Served</b></p>", unsafe_allow_html=True)
-                        
-                        with c4:
-                            if status != "Served":
-                                disable_buttons = (status == "Served")
-                                col_parcel, col_delete = st.columns(2) # Create two columns for the buttons
-                                with col_parcel:
-                                    if st.button("🛍️", key=f"parcel_{order_id}", help="Toggle Parcel Status", disabled=disable_buttons, use_container_width=True):
-                                        if not disable_buttons:
-                                            toggle_parcel_status(order_id)
-                                with col_delete:
-                                    if st.button("🗑️", key=f"del_{order_id}", use_container_width=True, help="Delete this item"):
-                                        delete_order(order_id)
-                    st.divider()
+                            with c3:
+                                if status == "Preparing":
+                                    st.markdown("<p style='color:orange; font-size:18px;'><b>Preparing</b></p>", unsafe_allow_html=True)
+                                elif status == "Ready":
+                                    st.button("Mark as Served", key=f"serve_{order_id}", on_click=update_status, args=(order_id, "Served"), use_container_width=True, type="primary")
+                                else:
+                                    st.markdown("<p style='color:lightgreen; font-size:18px;'><b>Served</b></p>", unsafe_allow_html=True)
+                            
+                            with c4:
+                                if status != "Served":
+                                    disable_buttons = (status == "Served")
+                                    col_parcel, col_delete = st.columns(2) # Create two columns for the buttons
+                                    with col_parcel:
+                                        if st.button("🛍️", key=f"parcel_{order_id}", help="Toggle Parcel Status", disabled=disable_buttons, use_container_width=True):
+                                            if not disable_buttons:
+                                                toggle_parcel_status(order_id)
+                                    with col_delete:
+                                        if st.button("🗑️", key=f"del_{order_id}", use_container_width=True, help="Delete this item"):
+                                            delete_order(order_id)
+                        st.divider()
 
 
-                st.markdown(f"<h5 style='text-align: right;'>Section Total: ₹{section_total:.2f}</h5>", unsafe_allow_html=True)
-                grand_total += section_total
-
+                    st.markdown(f"<h5 style='text-align: right;'>Section Total: ₹{section_total_display:.2f}</h5>", unsafe_allow_html=True)
+                
         if grand_total > 0:
             st.markdown("---")
             st.markdown(f"<h3 style='text-align: right;'>Grand Total: ₹{grand_total:.2f}</h3>", unsafe_allow_html=True)
